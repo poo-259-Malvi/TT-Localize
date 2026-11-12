@@ -69,7 +69,21 @@
     font-weight: 600;
     cursor: pointer;
   }
-  button.primary:disabled { opacity: 0.4; cursor: default; }
+  button.primary:disabled, button.secondary:disabled { opacity: 0.4; cursor: default; }
+  button.secondary {
+    width: 100%;
+    margin-top: 8px;
+    padding: 8px;
+    border: 1px solid var(--figma-color-border-strong, #bbb);
+    border-radius: 6px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+  }
+  label.check { display: flex; gap: 6px; align-items: center; font-weight: 600; }
+  details summary { cursor: pointer; }
+  code { font-size: 11px; padding: 0 3px; border-radius: 3px; background: var(--figma-color-bg-secondary, #f0f0f0); }
 
   progress { width: 100%; margin-top: 8px; }
   .status { margin-top: 10px; white-space: pre-wrap; }
@@ -123,6 +137,24 @@
   </section>
 
   <section>
+    <label class="check"><input type="checkbox" id="useSections" checked /> Put each language in its own section</label>
+    <div class="muted" style="margin-top:4px">Re-running replaces frames with the same name inside an existing language section.</div>
+  </section>
+
+  <section>
+    <details>
+      <summary class="muted">Keeping bold / coloured words</summary>
+      <div class="muted" style="margin-top:6px">
+        Words that stay the same (prices, numbers, brand names) keep their style automatically.
+        For translated words, wrap them in tags in your sheet:<br />
+        <code>&lt;1&gt;…&lt;/1&gt;</code>, <code>&lt;2&gt;…&lt;/2&gt;</code> = 1st, 2nd styled part of the original text<br />
+        <code>&lt;b&gt;</code> bold · <code>&lt;i&gt;</code> italic · <code>&lt;u&gt;</code> underlined<br />
+        e.g. <code>Jusqu'à &lt;1&gt;-50 %&lt;/1&gt; cette semaine</code>
+      </div>
+    </details>
+  </section>
+
+  <section>
     <div class="muted" id="rowCount"></div>
   </section>
 </div>
@@ -132,6 +164,8 @@
 </section>
 
 <button class="primary" id="generate" disabled>Generate localised frames</button>
+<button class="secondary" id="organize" disabled>Organise selected localised frames into sections</button>
+<div class="muted" style="margin-top:4px">For designs you already localised: detects the language from the frame name (e.g. “Banner / fr”, “Banner_FR”) and moves each into its language section.</div>
 <progress id="progress" class="hidden" value="0" max="1"></progress>
 <div class="status" id="status"></div>
 
@@ -265,6 +299,14 @@
 
   function updateButton() {
     $('generate').disabled = !table || selectionCount === 0 || selectedLanguages().length === 0;
+    $('organize').disabled = selectionCount === 0;
+  }
+
+  /** Language names for frame-name detection: every column except the key column. */
+  function sheetLanguages() {
+    if (!table) return [];
+    const key = Number($('keyCol').value);
+    return table.headers.filter((_, i) => i !== key);
   }
 
   function setStatus(html, isError) {
@@ -310,9 +352,15 @@
         keyColumn: Number($('keyCol').value),
         sourceColumn: Number($('sourceCol').value),
         languageColumns: selectedLanguages(),
+        useSections: $('useSections').checked,
         gap: 200,
       },
     }, '*');
+  });
+
+  $('organize').addEventListener('click', () => {
+    setStatus('Organising…');
+    parent.postMessage({ pluginMessage: { type: 'organize', languages: sheetLanguages() } }, '*');
   });
 
   window.onmessage = (event) => {
@@ -340,6 +388,7 @@
       let html = `<b>Done.</b> ${r.frames} frame(s) × ${r.languages.length} language(s)<ul>`;
       for (const l of r.languages) {
         html += `<li>${escapeHtml(l.language)}: ${l.replaced} replaced` +
+          (l.styledRuns ? `, ${l.styledRuns} styled part(s) kept` : '') +
           (l.emptyTranslation ? `, ${l.emptyTranslation} missing translation` : '') + '</li>';
       }
       html += '</ul>';
@@ -352,6 +401,17 @@
       }
       setStatus(html);
       updateButton();
+    } else if (msg.type === 'organized') {
+      let html = msg.counts.length
+        ? '<b>Organised.</b><ul>' +
+          msg.counts.map((c) => `<li>${escapeHtml(c.language)}: ${c.frames} frame(s)</li>`).join('') + '</ul>'
+        : '<b>No language found in the selected frame names.</b>';
+      if (msg.skipped.length) {
+        html += `<div class="muted">No language detected (left in place) — rename like “Name / fr”` +
+          (table ? '' : ' or upload your sheet first') + ':</div><ul>' +
+          msg.skipped.map((n) => `<li>${escapeHtml(n)}</li>`).join('') + '</ul>';
+      }
+      setStatus(html);
     }
   };
 </script>

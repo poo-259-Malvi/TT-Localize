@@ -21,6 +21,25 @@ Text layers are matched to rows by:
 
 Matching ignores case and extra whitespace. Unmatched text is left unchanged and listed in the report.
 
+## Mixed styles
+
+The text's main style is applied to the whole translation. Styled parts that appear
+unchanged in the translation (prices, numbers, brand names) keep their style automatically.
+For translated words, mark styled parts with tags in the sheet:
+
+- `<1>…</1>`, `<2>…</2>` — 1st, 2nd styled part of the original text
+- `<b>`, `<i>`, `<u>` — the bold / italic / underlined part
+
+Example: `Jusqu'à <1>-50 %</1>, cette semaine seulement`
+
+## Sections
+
+- **Generate** puts each language in its own section (`fr`, `de`, …). Re-running replaces
+  frames with the same name inside an existing language section.
+- **Organise selected localised frames into sections** moves existing localised frames into
+  language sections, detecting the language from names like `Banner / fr`, `Banner_FR` or
+  `Hero (de)`.
+
 ## Development
 
 ```bash
