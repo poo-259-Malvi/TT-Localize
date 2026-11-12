@@ -1,0 +1,357 @@
+<!-- Loaded only for .xlsx / .xls support. CSV works without it. -->
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 16px;
+    font: 12px/1.4 Inter, system-ui, -apple-system, sans-serif;
+    color: var(--figma-color-text, #222);
+    background: var(--figma-color-bg, #fff);
+  }
+  h2 { font-size: 13px; margin: 0 0 4px; }
+  .muted { color: var(--figma-color-text-secondary, #777); }
+  section { margin-bottom: 16px; }
+  label.title { display: block; font-weight: 600; margin-bottom: 6px; }
+
+  .drop {
+    border: 1px dashed var(--figma-color-border-strong, #bbb);
+    border-radius: 6px;
+    padding: 18px 12px;
+    text-align: center;
+    cursor: pointer;
+  }
+  .drop.over { border-color: var(--figma-color-border-brand, #0d99ff); background: var(--figma-color-bg-brand-tertiary, #e5f4ff); }
+  .drop input { display: none; }
+  .file-name { margin-top: 6px; font-weight: 600; word-break: break-all; }
+
+  select {
+    width: 100%;
+    padding: 6px;
+    border: 1px solid var(--figma-color-border, #ddd);
+    border-radius: 4px;
+    background: var(--figma-color-bg, #fff);
+    color: inherit;
+    font: inherit;
+  }
+  .row { display: flex; gap: 8px; }
+  .row > div { flex: 1; min-width: 0; }
+
+  .langs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px 8px;
+    max-height: 130px;
+    overflow: auto;
+    padding: 6px;
+    border: 1px solid var(--figma-color-border, #ddd);
+    border-radius: 4px;
+  }
+  .langs label { display: flex; gap: 6px; align-items: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .link { background: none; border: 0; padding: 0; color: var(--figma-color-text-brand, #0d99ff); cursor: pointer; font: inherit; }
+
+  .selection {
+    padding: 8px;
+    border-radius: 4px;
+    background: var(--figma-color-bg-secondary, #f5f5f5);
+  }
+  .selection.empty { color: var(--figma-color-text-danger, #e03e1a); }
+
+  button.primary {
+    width: 100%;
+    padding: 9px;
+    border: 0;
+    border-radius: 6px;
+    background: var(--figma-color-bg-brand, #0d99ff);
+    color: var(--figma-color-text-onbrand, #fff);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button.primary:disabled { opacity: 0.4; cursor: default; }
+
+  progress { width: 100%; margin-top: 8px; }
+  .status { margin-top: 10px; white-space: pre-wrap; }
+  .status.error { color: var(--figma-color-text-danger, #e03e1a); }
+  .status ul { margin: 4px 0; padding-left: 16px; }
+  .hidden { display: none; }
+</style>
+
+<section>
+  <h2>TT-Localize</h2>
+  <div class="muted">Select frames, upload your copy sheet, and generate a localised copy of each frame per language.</div>
+</section>
+
+<section>
+  <label class="drop" id="drop">
+    <input type="file" id="file" accept=".csv,.tsv,.txt,.xlsx,.xls" />
+    <div>Click or drop a <b>CSV</b> or <b>Excel</b> file</div>
+    <div class="muted">First row = headers (e.g. key, en, fr, de)</div>
+    <div class="file-name" id="fileName"></div>
+  </label>
+</section>
+
+<div id="config" class="hidden">
+  <section id="sheetSection" class="hidden">
+    <label class="title" for="sheet">Sheet</label>
+    <select id="sheet"></select>
+  </section>
+
+  <section class="row">
+    <div>
+      <label class="title" for="keyCol">Layer name column</label>
+      <select id="keyCol"></select>
+    </div>
+    <div>
+      <label class="title" for="sourceCol">Source text column</label>
+      <select id="sourceCol"></select>
+    </div>
+  </section>
+  <div class="muted" style="margin:-10px 0 16px">
+    Text layers are matched by layer name first, then by their current text.
+  </div>
+
+  <section>
+    <label class="title">
+      Languages to generate
+      <span style="float:right; font-weight:normal">
+        <button class="link" id="all">All</button> · <button class="link" id="none">None</button>
+      </span>
+    </label>
+    <div class="langs" id="langs"></div>
+  </section>
+
+  <section>
+    <div class="muted" id="rowCount"></div>
+  </section>
+</div>
+
+<section>
+  <div class="selection" id="selection">Nothing selected</div>
+</section>
+
+<button class="primary" id="generate" disabled>Generate localised frames</button>
+<progress id="progress" class="hidden" value="0" max="1"></progress>
+<div class="status" id="status"></div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  let table = null; // { headers: string[], rows: string[][] }
+  let workbook = null;
+  let selectionCount = 0;
+
+  // ---------- CSV parsing ----------
+
+  function detectDelimiter(text) {
+    const firstLine = text.split(/\r?\n/, 1)[0] || '';
+    const counts = [',', ';', '\t'].map((d) => [d, firstLine.split(d).length]);
+    counts.sort((a, b) => b[1] - a[1]);
+    return counts[0][0];
+  }
+
+  function parseCSV(text) {
+    text = text.replace(/^﻿/, '');
+    const delim = detectDelimiter(text);
+    const rows = [];
+    let row = [];
+    let field = '';
+    let inQuotes = false;
+
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (inQuotes) {
+        if (c === '"') {
+          if (text[i + 1] === '"') { field += '"'; i++; }
+          else inQuotes = false;
+        } else field += c;
+      } else if (c === '"') {
+        inQuotes = true;
+      } else if (c === delim) {
+        row.push(field); field = '';
+      } else if (c === '\n' || c === '\r') {
+        if (c === '\r' && text[i + 1] === '\n') i++;
+        row.push(field); rows.push(row); row = []; field = '';
+      } else field += c;
+    }
+    if (field !== '' || row.length) { row.push(field); rows.push(row); }
+    return rows;
+  }
+
+  function toTable(rows) {
+    rows = rows
+      .map((r) => r.map((v) => (v == null ? '' : String(v))))
+      .filter((r) => r.some((v) => v.trim() !== ''));
+    if (rows.length < 2) throw new Error('The file needs a header row and at least one data row.');
+    const headers = rows[0].map((h, i) => h.trim() || `Column ${i + 1}`);
+    return { headers, rows: rows.slice(1) };
+  }
+
+  // ---------- File loading ----------
+
+  async function handleFile(file) {
+    $('fileName').textContent = file.name;
+    setStatus('');
+    workbook = null;
+    try {
+      if (/\.(xlsx|xls)$/i.test(file.name)) {
+        if (typeof XLSX === 'undefined') {
+          throw new Error('Excel support could not load (no internet?). Save the sheet as CSV and try again.');
+        }
+        workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+        const sheet = $('sheet');
+        sheet.innerHTML = workbook.SheetNames.map((n) => `<option>${escapeHtml(n)}</option>`).join('');
+        $('sheetSection').classList.toggle('hidden', workbook.SheetNames.length < 2);
+        loadSheet(workbook.SheetNames[0]);
+      } else {
+        $('sheetSection').classList.add('hidden');
+        setTable(toTable(parseCSV(await file.text())));
+      }
+    } catch (err) {
+      table = null;
+      $('config').classList.add('hidden');
+      setStatus(err.message, true);
+      updateButton();
+    }
+  }
+
+  function loadSheet(name) {
+    const ws = workbook.Sheets[name];
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: false });
+    setTable(toTable(rows));
+  }
+
+  function guessColumn(headers, patterns) {
+    return headers.findIndex((h) => patterns.some((p) => p.test(h.trim())));
+  }
+
+  function setTable(t) {
+    table = t;
+    const opts = t.headers.map((h, i) => `<option value="${i}">${escapeHtml(h)}</option>`).join('');
+    const none = '<option value="-1">— don\'t use —</option>';
+    $('keyCol').innerHTML = none + opts;
+    $('sourceCol').innerHTML = none + opts;
+
+    let keyIdx = guessColumn(t.headers, [/^(key|id|layer|layer ?name|name|string ?id)$/i]);
+    let srcIdx = guessColumn(t.headers, [/^(en|en[-_ ]?(us|gb)?|english|source|copy|base)$/i]);
+    if (keyIdx < 0 && srcIdx < 0) keyIdx = 0;
+    $('keyCol').value = String(keyIdx);
+    $('sourceCol').value = String(srcIdx);
+
+    renderLanguages();
+    $('rowCount').textContent = `${t.rows.length} rows · ${t.headers.length} columns loaded`;
+    $('config').classList.remove('hidden');
+    updateButton();
+  }
+
+  function renderLanguages() {
+    const key = Number($('keyCol').value);
+    const src = Number($('sourceCol').value);
+    $('langs').innerHTML = table.headers
+      .map((h, i) => {
+        if (i === key) return '';
+        const checked = i !== src ? 'checked' : '';
+        return `<label title="${escapeHtml(h)}"><input type="checkbox" value="${i}" ${checked}/> ${escapeHtml(h)}</label>`;
+      })
+      .join('');
+    updateButton();
+  }
+
+  function selectedLanguages() {
+    return [...$('langs').querySelectorAll('input:checked')].map((el) => Number(el.value));
+  }
+
+  // ---------- UI state ----------
+
+  function updateButton() {
+    $('generate').disabled = !table || selectionCount === 0 || selectedLanguages().length === 0;
+  }
+
+  function setStatus(html, isError) {
+    $('status').innerHTML = html;
+    $('status').classList.toggle('error', !!isError);
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+  }
+
+  // ---------- Events ----------
+
+  $('file').addEventListener('change', (e) => e.target.files[0] && handleFile(e.target.files[0]));
+  const drop = $('drop');
+  drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+  drop.addEventListener('drop', (e) => {
+    e.preventDefault();
+    drop.classList.remove('over');
+    if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+  });
+
+  $('sheet').addEventListener('change', (e) => {
+    try { loadSheet(e.target.value); setStatus(''); } catch (err) { setStatus(err.message, true); }
+  });
+  $('keyCol').addEventListener('change', renderLanguages);
+  $('sourceCol').addEventListener('change', renderLanguages);
+  $('langs').addEventListener('change', updateButton);
+  $('all').addEventListener('click', () => { $('langs').querySelectorAll('input').forEach((el) => (el.checked = true)); updateButton(); });
+  $('none').addEventListener('click', () => { $('langs').querySelectorAll('input').forEach((el) => (el.checked = false)); updateButton(); });
+
+  $('generate').addEventListener('click', () => {
+    $('generate').disabled = true;
+    $('progress').classList.remove('hidden');
+    $('progress').value = 0;
+    setStatus('Generating…');
+    parent.postMessage({
+      pluginMessage: {
+        type: 'generate',
+        headers: table.headers,
+        rows: table.rows,
+        keyColumn: Number($('keyCol').value),
+        sourceColumn: Number($('sourceCol').value),
+        languageColumns: selectedLanguages(),
+        gap: 200,
+      },
+    }, '*');
+  });
+
+  window.onmessage = (event) => {
+    const msg = event.data.pluginMessage;
+    if (!msg) return;
+
+    if (msg.type === 'selection') {
+      selectionCount = msg.count;
+      const el = $('selection');
+      el.classList.toggle('empty', msg.count === 0);
+      el.textContent = msg.count === 0
+        ? 'Select the frames you want to localise in Figma.'
+        : `${msg.count} selected: ${msg.names.join(', ')}${msg.count > msg.names.length ? '…' : ''}`;
+      updateButton();
+    } else if (msg.type === 'progress') {
+      $('progress').max = msg.total;
+      $('progress').value = msg.done;
+    } else if (msg.type === 'error') {
+      $('progress').classList.add('hidden');
+      setStatus(escapeHtml(msg.message), true);
+      updateButton();
+    } else if (msg.type === 'done') {
+      $('progress').classList.add('hidden');
+      const r = msg.report;
+      let html = `<b>Done.</b> ${r.frames} frame(s) × ${r.languages.length} language(s)<ul>`;
+      for (const l of r.languages) {
+        html += `<li>${escapeHtml(l.language)}: ${l.replaced} replaced` +
+          (l.emptyTranslation ? `, ${l.emptyTranslation} missing translation` : '') + '</li>';
+      }
+      html += '</ul>';
+      if (r.unmatched.length) {
+        html += `<div class="muted">Text with no matching row (left unchanged):</div><ul>` +
+          r.unmatched.map((t) => `<li>${escapeHtml(t)}</li>`).join('') + '</ul>';
+      }
+      if (r.missingFonts.length) {
+        html += `<div class="error">Skipped (missing font): ${r.missingFonts.map(escapeHtml).join(', ')}</div>`;
+      }
+      setStatus(html);
+      updateButton();
+    }
+  };
+</script>

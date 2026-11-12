@@ -1,0 +1,19 @@
+{
+  "name": "TT-Localize",
+  "id": "1702609524171194260",
+  "api": "1.0.0",
+  "main": "code.js",
+  "capabilities": [],
+  "enableProposedApi": false,
+  "documentAccess": "dynamic-page",
+  "editorType": [
+    "figma"
+  ],
+  "networkAccess": {
+    "allowedDomains": [
+      "https://cdn.sheetjs.com"
+    ],
+    "reasoning": "Loads the SheetJS library so the plugin can read Excel (.xlsx/.xls) files. CSV files work offline."
+  },
+  "ui": "ui.html"
+}
