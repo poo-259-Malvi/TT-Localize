@@ -1,40 +1,36 @@
-Below are the steps to get your plugin running. You can also find instructions at:
+# TT-Localize
+Create localized frames in Figma using csv files
 
-  https://www.figma.com/plugin-docs/plugin-quickstart-guide/
+Select one or more frames in Figma, upload a CSV or Excel copy sheet, and the plugin
+duplicates each frame once per language with the copy replaced by its translation.
 
-This plugin template uses Typescript and NPM, two standard tools in creating JavaScript applications.
+## Copy sheet format
 
-First, download Node.js which comes with NPM. This will allow you to install TypeScript and other
-libraries. You can find the download link here:
+The first row is the header: one key column, one source-language column, then one
+column per language. See [sample-copy.csv](sample-copy.csv).
 
-  https://nodejs.org/en/download/
+```
+key,en,fr,de,es
+headline,Summer sale is here,Les soldes d'été sont là,Der Sommerschlussverkauf ist da,Las rebajas de verano ya están aquí
+cta,Shop now,Acheter,Jetzt kaufen,Comprar ahora
+```
 
-Next, install TypeScript using the command:
+Text layers are matched to rows by:
+1. **Layer name** → key column (a text layer named `headline` uses the `headline` row)
+2. **Current text** → source column (a layer reading "Shop now" uses the `cta` row)
 
-  npm install -g typescript
+Matching ignores case and extra whitespace. Unmatched text is left unchanged and listed in the report.
 
-Finally, in the directory of your plugin, get the latest type definitions for the plugin API by running:
+## Development
 
-  npm install --save-dev @figma/plugin-typings
+```bash
+npm install
+npm run build   # compiles code.ts -> code.js
+npm run watch   # rebuild on save
+npm run lint
+```
 
-If you are familiar with JavaScript, TypeScript will look very familiar. In fact, valid JavaScript code
-is already valid Typescript code.
+In the Figma desktop app: **Plugins → Development → Import plugin from manifest…** and pick `manifest.json`.
 
-TypeScript adds type annotations to variables. This allows code editors such as Visual Studio Code
-to provide information about the Figma API while you are writing code, as well as help catch bugs
-you previously didn't notice.
-
-For more information, visit https://www.typescriptlang.org/
-
-Using TypeScript requires a compiler to convert TypeScript (code.ts) into JavaScript (code.js)
-for the browser to run.
-
-We recommend writing TypeScript code using Visual Studio code:
-
-1. Download Visual Studio Code if you haven't already: https://code.visualstudio.com/.
-2. Open this directory in Visual Studio Code.
-3. Compile TypeScript to JavaScript: Run the "Terminal > Run Build Task..." menu item,
-    then select "npm: watch". You will have to do this again every time
-    you reopen Visual Studio Code.
-
-That's it! Visual Studio Code will regenerate the JavaScript file every time you save.
+Excel (.xlsx/.xls) files are parsed with SheetJS loaded from `cdn.sheetjs.com`, so they need an
+internet connection; CSV files work offline.
